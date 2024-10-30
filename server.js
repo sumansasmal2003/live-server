@@ -24,22 +24,26 @@ const activeStreams = new Map();
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
+    // Immediately send current active streams to the newly connected client
+    socket.emit('active-streams', Array.from(activeStreams.values()));
+
     // When broadcasting starts, add to activeStreams
     socket.on('start-broadcast', () => {
-        activeStreams.set(socket.id, { streamId: socket.id });
+        activeStreams.set(socket.id, { streamId: socket.id }); // You can add more data if needed
         io.emit('active-streams', Array.from(activeStreams.values())); // Notify all clients
     });
 
     // When broadcasting stops, remove from activeStreams
     socket.on('stop-broadcast', () => {
-        activeStreams.delete(socket.id);
-        io.emit('active-streams', Array.from(activeStreams.values())); // Update clients
+        if (activeStreams.delete(socket.id)) {
+            io.emit('active-streams', Array.from(activeStreams.values())); // Update clients
+        }
     });
 
     // Handle offer sent by broadcaster
     socket.on('offer', ({ offer, streamId, viewerSocketId }) => {
         if (offer && offer.sdp && offer.type === 'offer') {
-            // Store the viewer's socket ID temporarily for sending the answer later
+            // Send the offer to the specified viewer
             socket.to(viewerSocketId).emit('offer', { offer, streamId });
         } else {
             console.error('Invalid offer received from broadcaster:', offer);
@@ -62,13 +66,11 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
-        if (activeStreams.has(socket.id)) {
-            activeStreams.delete(socket.id);
-            io.emit('active-streams', Array.from(activeStreams.values()));
+        if (activeStreams.delete(socket.id)) {
+            io.emit('active-streams', Array.from(activeStreams.values())); // Notify clients of updated streams
         }
     });
 });
-
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
