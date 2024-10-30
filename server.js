@@ -9,7 +9,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: 'http://localhost:5173', // Change to your frontend URL if necessary
+        origin: 'http://localhost:5173', // Adjust this to your frontend URL if necessary
         methods: ['GET', 'POST'],
         allowedHeaders: ['Content-Type'],
         credentials: true,
@@ -18,48 +18,54 @@ const io = socketIo(server, {
 
 app.use(cors());
 
-// Store active streams
+// Store active streams and viewers
 const activeStreams = new Map();
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
-    // When broadcasting starts, add to activeStreams
-    socket.on('start-broadcast', () => {
-        activeStreams.set(socket.id, { streamId: socket.id });
-        io.emit('active-streams', Array.from(activeStreams.values())); // Notify all clients
+    // Start broadcasting
+    socket.on('start-broadcast', (data) => {
+        activeStreams.set(socket.id, { streamId: socket.id, viewers: 0, broadcasterData: data });
+        io.emit('active-streams', Array.from(activeStreams.values()));
+        console.log('Broadcast started:', socket.id);
     });
 
-    // When broadcasting stops, remove from activeStreams
+    // Stop broadcasting
     socket.on('stop-broadcast', () => {
         activeStreams.delete(socket.id);
-        io.emit('active-streams', Array.from(activeStreams.values())); // Update clients
+        io.emit('active-streams', Array.from(activeStreams.values()));
+        console.log('Broadcast stopped:', socket.id);
     });
 
-    // Handle offer sent by broadcaster
-    socket.on('offer', ({ offer, streamId, viewerSocketId }) => {
-        if (offer && offer.sdp && offer.type === 'offer') {
-            // Store the viewer's socket ID temporarily for sending the answer later
-            socket.to(viewerSocketId).emit('offer', { offer, streamId });
-        } else {
-            console.error('Invalid offer received from broadcaster:', offer);
+    // Request an offer for a viewer
+    socket.on('request-offer', (streamId) => {
+        if (activeStreams.has(streamId)) {
+            io.to(streamId).emit('send-offer', socket.id);
+            activeStreams.get(streamId).viewers += 1;
+            io.emit('viewer-count-update', {
+                streamId,
+                viewers: activeStreams.get(streamId).viewers,
+            });
         }
     });
 
-    socket.on('request-offer', (streamId) => {
-        // Notify the broadcaster (by their stream ID) to send an offer to this socket
-        io.to(streamId).emit('send-offer', socket.id);
+    // Send offer to viewer
+    socket.on('offer', ({ offer, streamId, viewerSocketId }) => {
+        socket.to(viewerSocketId).emit('offer', { offer, streamId });
     });
 
-    // Modified the answer event handler to include the streamId
+    // Receive answer from viewer
     socket.on('answer', ({ answer, streamId }) => {
-        socket.to(streamId).emit('answer', { answer, streamId });
+        socket.to(streamId).emit('answer', { answer });
     });
 
+    // Handle ICE candidates
     socket.on('ice-candidate', (data) => {
         socket.broadcast.emit('ice-candidate', data);
     });
 
+    // Disconnect
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
         if (activeStreams.has(socket.id)) {
@@ -68,7 +74,6 @@ io.on('connection', (socket) => {
         }
     });
 });
-
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
