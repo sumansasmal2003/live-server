@@ -1,4 +1,5 @@
 // server.js
+
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -32,9 +33,16 @@ io.on('connection', (socket) => {
 
     // Stop broadcasting
     socket.on('stop-broadcast', () => {
-        activeStreams.delete(socket.id);
-        io.emit('active-streams', Array.from(activeStreams.values()));
-        console.log('Broadcast stopped:', socket.id);
+        if (activeStreams.has(socket.id)) {
+            // Notify viewers and remove the stream
+            const stream = activeStreams.get(socket.id);
+            stream.viewers.forEach(viewerId => {
+                io.to(viewerId).emit('broadcast-ended');
+            });
+            activeStreams.delete(socket.id);
+            io.emit('active-streams', Array.from(activeStreams.values()));
+            console.log('Broadcast stopped:', socket.id);
+        }
     });
 
     // Viewer requests an offer to connect to a stream
@@ -42,7 +50,7 @@ io.on('connection', (socket) => {
         if (activeStreams.has(streamId)) {
             const stream = activeStreams.get(streamId);
             stream.viewers.push(socket.id); // Track the viewer
-            io.to(streamId).emit('send-offer', socket.id);
+            io.to(streamId).emit('send-offer', socket.id); // Request broadcaster to send an offer
             io.emit('viewer-count-update', { streamId, viewers: stream.viewers.length });
             console.log(`Viewer ${socket.id} requested offer for stream ${streamId}`);
         } else {
@@ -52,24 +60,20 @@ io.on('connection', (socket) => {
 
     // Send offer to viewer
     socket.on('offer', ({ offer, streamId, viewerSocketId }) => {
-        socket.to(viewerSocketId).emit('offer', { offer, streamId });
+        io.to(viewerSocketId).emit('offer', { offer, streamId });
         console.log(`Sent offer from ${socket.id} to viewer ${viewerSocketId} for stream ${streamId}`);
     });
 
     // Receive answer from viewer
-    socket.on('answer', ({ answer, streamId }) => {
-        socket.to(streamId).emit('answer', { answer });
-        console.log(`Received answer for stream ${streamId}`);
+    socket.on('answer', ({ answer, streamId, viewerSocketId }) => {
+        io.to(streamId).emit('answer', { answer, viewerSocketId });
+        console.log(`Received answer from viewer ${viewerSocketId} for stream ${streamId}`);
     });
 
-    // Handle ICE candidates, targeted to either the stream or a viewer
-    socket.on('ice-candidate', ({ candidate, streamId, viewerSocketId }) => {
-        if (viewerSocketId) {
-            socket.to(viewerSocketId).emit('ice-candidate', { candidate, streamId });
-        } else if (streamId) {
-            socket.to(streamId).emit('ice-candidate', { candidate });
-        }
-        console.log(`ICE candidate for ${streamId} from ${socket.id}`);
+    // Handle ICE candidates, targeted to either the broadcaster or a viewer
+    socket.on('ice-candidate', ({ candidate, streamId, targetSocketId }) => {
+        io.to(targetSocketId).emit('ice-candidate', { candidate, streamId });
+        console.log(`ICE candidate sent to ${targetSocketId} for stream ${streamId} from ${socket.id}`);
     });
 
     // Send active streams to newly connected clients
@@ -81,8 +85,13 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
 
-        // If broadcaster disconnects, remove the stream and update clients
+        // If broadcaster disconnects, remove the stream and notify clients
         if (activeStreams.has(socket.id)) {
+            const stream = activeStreams.get(socket.id);
+            // Notify all viewers of the stream that the broadcast ended
+            stream.viewers.forEach(viewerId => {
+                io.to(viewerId).emit('broadcast-ended');
+            });
             activeStreams.delete(socket.id);
             io.emit('active-streams', Array.from(activeStreams.values()));
             console.log('Broadcast stopped:', socket.id);
@@ -93,6 +102,7 @@ io.on('connection', (socket) => {
                 if (viewerIndex !== -1) {
                     stream.viewers.splice(viewerIndex, 1);
                     io.emit('viewer-count-update', { streamId, viewers: stream.viewers.length });
+                    console.log(`Viewer ${socket.id} disconnected from stream ${streamId}`);
                 }
             });
         }
