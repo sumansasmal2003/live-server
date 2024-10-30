@@ -18,32 +18,40 @@ const io = socketIo(server, {
 
 app.use(cors());
 
-// Store active streams
-const activeStreams = new Map();
+// Store active streams and their viewer count
+const activeStreams = new Map(); // Map of streamId to { streamId, viewers: Set of viewer socket IDs }
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
 
-    // Immediately send current active streams to the newly connected client
-    socket.emit('active-streams', Array.from(activeStreams.values()));
+    // Send current active streams to the newly connected client
+    socket.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+        streamId: stream.streamId,
+        viewerCount: stream.viewers.size,
+    })));
 
     // When broadcasting starts, add to activeStreams
     socket.on('start-broadcast', () => {
-        activeStreams.set(socket.id, { streamId: socket.id }); // You can add more data if needed
-        io.emit('active-streams', Array.from(activeStreams.values())); // Notify all clients
+        activeStreams.set(socket.id, { streamId: socket.id, viewers: new Set() });
+        io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+            streamId: stream.streamId,
+            viewerCount: stream.viewers.size,
+        })));
     });
 
     // When broadcasting stops, remove from activeStreams
     socket.on('stop-broadcast', () => {
         if (activeStreams.delete(socket.id)) {
-            io.emit('active-streams', Array.from(activeStreams.values())); // Update clients
+            io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+                streamId: stream.streamId,
+                viewerCount: stream.viewers.size,
+            })));
         }
     });
 
-    // Handle offer sent by broadcaster
+    // Handle offer sent by broadcaster to a viewer
     socket.on('offer', ({ offer, streamId, viewerSocketId }) => {
         if (offer && offer.sdp && offer.type === 'offer') {
-            // Send the offer to the specified viewer
             socket.to(viewerSocketId).emit('offer', { offer, streamId });
         } else {
             console.error('Invalid offer received from broadcaster:', offer);
@@ -51,23 +59,50 @@ io.on('connection', (socket) => {
     });
 
     socket.on('request-offer', (streamId) => {
-        // Notify the broadcaster (by their stream ID) to send an offer to this socket
-        io.to(streamId).emit('send-offer', socket.id);
+        // Notify broadcaster to send an offer to this viewer
+        const stream = activeStreams.get(streamId);
+        if (stream) {
+            stream.viewers.add(socket.id); // Add viewer to the stream's viewers set
+            io.to(streamId).emit('viewer-joined'); // Notify broadcaster of a new viewer
+            io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+                streamId: stream.streamId,
+                viewerCount: stream.viewers.size,
+            }))); // Update all clients with new viewer count
+            io.to(streamId).emit('send-offer', socket.id);
+        }
     });
 
-    // Modified the answer event handler to include the streamId
+    // Handle answer from viewer to broadcaster
     socket.on('answer', ({ answer, streamId }) => {
         socket.to(streamId).emit('answer', { answer, streamId });
     });
 
+    // Handle ICE candidates for WebRTC connections
     socket.on('ice-candidate', (data) => {
         socket.broadcast.emit('ice-candidate', data);
     });
 
+    // Handle disconnection
     socket.on('disconnect', () => {
         console.log('Client disconnected:', socket.id);
+
+        // Check if the disconnected socket was a broadcaster
         if (activeStreams.delete(socket.id)) {
-            io.emit('active-streams', Array.from(activeStreams.values())); // Notify clients of updated streams
+            io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+                streamId: stream.streamId,
+                viewerCount: stream.viewers.size,
+            })));
+        } else {
+            // Check if the disconnected socket was a viewer and remove from viewers list
+            activeStreams.forEach((stream, streamId) => {
+                if (stream.viewers.delete(socket.id)) {
+                    io.to(streamId).emit('viewer-left'); // Notify broadcaster of viewer departure
+                    io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
+                        streamId: stream.streamId,
+                        viewerCount: stream.viewers.size,
+                    }))); // Update all clients with new viewer count
+                }
+            });
         }
     });
 });
