@@ -28,14 +28,18 @@ io.on('connection', (socket) => {
     socket.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
         streamId: stream.streamId,
         viewerCount: stream.viewers.size,
+        name: stream.name,
+        profileImageUrl: stream.profileImageUrl,
     })));
 
     // When broadcasting starts, add to activeStreams
     socket.on('start-broadcast', () => {
-        activeStreams.set(socket.id, { streamId: socket.id, viewers: new Set() });
+        activeStreams.set(socket.id, { streamId: socket.id, viewers: new Set(), name, profileImageUrl });
         io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
             streamId: stream.streamId,
             viewerCount: stream.viewers.size,
+            name: stream.name,
+            profileImageUrl: stream.profileImageUrl,
         })));
     });
 
@@ -45,6 +49,8 @@ io.on('connection', (socket) => {
             io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
                 streamId: stream.streamId,
                 viewerCount: stream.viewers.size,
+                name: stream.name,
+                profileImageUrl: stream.profileImageUrl,
             })));
         }
     });
@@ -67,6 +73,8 @@ io.on('connection', (socket) => {
             io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
                 streamId: stream.streamId,
                 viewerCount: stream.viewers.size,
+                name: stream.name,
+                profileImageUrl: stream.profileImageUrl,
             }))); // Update all clients with new viewer count
             io.to(streamId).emit('send-offer', socket.id);
         }
@@ -91,6 +99,8 @@ io.on('connection', (socket) => {
             io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
                 streamId: stream.streamId,
                 viewerCount: stream.viewers.size,
+                name: stream.name,
+                profileImageUrl: stream.profileImageUrl,
             })));
         } else {
             // Check if the disconnected socket was a viewer and remove from viewers list
@@ -100,6 +110,8 @@ io.on('connection', (socket) => {
                     io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
                         streamId: stream.streamId,
                         viewerCount: stream.viewers.size,
+                        name: stream.name,
+                        profileImageUrl: stream.profileImageUrl,
                     }))); // Update all clients with new viewer count
                 }
             });
