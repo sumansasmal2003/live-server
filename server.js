@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: 'https://cookbook-in.netlify.app', // Change to your frontend URL if necessary
+        origin: 'https://cookbook-in.netlify.app', // Replace with your frontend URL
         methods: ['GET', 'POST'],
         allowedHeaders: ['Content-Type'],
         credentials: true,
@@ -32,20 +32,21 @@ io.on('connection', (socket) => {
 
     // When broadcasting starts, add to activeStreams with user info
     socket.on('start-broadcast', ({ name, profileImageUrl }) => {
-        // Ensure name and profileImageUrl are provided
+        // Validate name and profileImageUrl
         if (!name || !profileImageUrl) {
             console.error('Missing name or profileImageUrl in start-broadcast');
+            socket.emit('broadcast-error', 'Name and profile image URL are required to start a broadcast.');
             return;
         }
 
         // Add the stream with user details to the activeStreams map
-        activeStreams.set(socket.id, { 
-            streamId: socket.id, 
-            viewers: new Set(), 
-            name, 
-            profileImageUrl 
+        activeStreams.set(socket.id, {
+            streamId: socket.id,
+            viewers: new Set(),
+            name,
+            profileImageUrl
         });
-        
+
         // Notify all clients of the updated active streams list
         io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
             streamId: stream.streamId,
@@ -78,7 +79,6 @@ io.on('connection', (socket) => {
     });
 
     socket.on('request-offer', (streamId) => {
-        // Notify broadcaster to send an offer to this viewer
         const stream = activeStreams.get(streamId);
         if (stream) {
             stream.viewers.add(socket.id); // Add viewer to the stream's viewers set
