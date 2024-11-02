@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
     cors: {
-        origin: 'https://cookbook-in.netlify.app', // Replace with your frontend URL
+        origin: ['https://cookbook-in.netlify.app', 'http://localhost:5173'], // Replace with your frontend URL
         methods: ['GET', 'POST'],
         allowedHeaders: ['Content-Type'],
         credentials: true,
