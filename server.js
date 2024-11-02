@@ -1,5 +1,3 @@
-// server.js
-
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -19,7 +17,7 @@ const io = socketIo(server, {
 app.use(cors());
 
 // Store active streams and their viewer count
-const activeStreams = new Map(); // Map of streamId to { streamId, viewers: Set of viewer socket IDs }
+const activeStreams = new Map(); // Map of streamId to { streamId, viewers: Set of viewer socket IDs, name, profileImageUrl }
 
 io.on('connection', (socket) => {
     console.log('New client connected:', socket.id);
@@ -32,9 +30,23 @@ io.on('connection', (socket) => {
         profileImageUrl: stream.profileImageUrl,
     })));
 
-    // When broadcasting starts, add to activeStreams
-    socket.on('start-broadcast', () => {
-        activeStreams.set(socket.id, { streamId: socket.id, viewers: new Set(), name, profileImageUrl });
+    // When broadcasting starts, add to activeStreams with user info
+    socket.on('start-broadcast', ({ name, profileImageUrl }) => {
+        // Ensure name and profileImageUrl are provided
+        if (!name || !profileImageUrl) {
+            console.error('Missing name or profileImageUrl in start-broadcast');
+            return;
+        }
+
+        // Add the stream with user details to the activeStreams map
+        activeStreams.set(socket.id, { 
+            streamId: socket.id, 
+            viewers: new Set(), 
+            name, 
+            profileImageUrl 
+        });
+        
+        // Notify all clients of the updated active streams list
         io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
             streamId: stream.streamId,
             viewerCount: stream.viewers.size,
@@ -46,6 +58,7 @@ io.on('connection', (socket) => {
     // When broadcasting stops, remove from activeStreams
     socket.on('stop-broadcast', () => {
         if (activeStreams.delete(socket.id)) {
+            // Update all clients with the modified active streams list
             io.emit('active-streams', Array.from(activeStreams.values()).map(stream => ({
                 streamId: stream.streamId,
                 viewerCount: stream.viewers.size,
